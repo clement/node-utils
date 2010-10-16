@@ -7,6 +7,10 @@ var toBase64 = function(str) {
   return  (new Buffer(str || "", "ascii")).toString("base64");
 };
 
+var postResponseErrorHandler = function(e) {
+  sys.log("received an error after the end of the response `"+e+"`");
+};
+
 function request (options, callback) {
   if (!options.uri) {
     throw new Error("options.uri is a required argument")
@@ -81,6 +85,10 @@ function request (options, callback) {
     
     response.addListener("end", function () {
       options.client.removeListener("error", clientErrorHandler);
+      /* Some errors can happen after the `end` event has been received,
+       * for example, with an invalid Content-Length. Attaching a no-op
+       * handler avoid having node crashing in those cases */
+      options.client.addListener("error", postResponseErrorHandler);
       
       if (response.statusCode > 299 && response.statusCode < 400 && options.followRedirect && response.headers.location && (options._redirectsFollowed < options.maxRedirects) ) {
         options._redirectsFollowed += 1
