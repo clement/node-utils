@@ -109,6 +109,15 @@ function request (options, callback) {
       buffer = '';
       responseStream.addListener("data", function (chunk) { buffer += chunk; } )
     }
+
+    var closeTimeout;
+    // If the server closes the connection before sending all the request,
+    // we're sitting ducks
+    options.client.addListener("close", function () {
+            // Let's give some time to the response to catch up,
+            // then fire manually the end event
+            closeTimeout = setTimeout(function () { responseStream.emit("end"); }, options.closeTimeout || 10000);
+        });
     
     responseStream.addListener("end", function () {
       options.client.removeListener("error", clientErrorHandler);
@@ -116,6 +125,11 @@ function request (options, callback) {
        * for example, with an invalid Content-Length. Attaching a no-op
        * handler avoid having node crashing in those cases */
       options.client.addListener("error", postResponseErrorHandler);
+      // Remove the timeout if necessary, and also detach the "end" listener
+      // in the edge case when the response took more than the timeout to
+      // reach the end state after closing the underlying socket
+      if (closeTimeout) { clearTimeout(closeTimeout); }
+      responseStream.removeListener("end", arguments.callee);
       
       if (response.statusCode > 299 && response.statusCode < 400 && options.followRedirect && response.headers.location && (options._redirectsFollowed < options.maxRedirects) ) {
         options._redirectsFollowed += 1
