@@ -3,6 +3,15 @@ var http = require('http')
   , sys = require('sys')
   ;
 
+var compress;
+try {
+    compress = require('compress');
+}
+catch (e) {
+    sys.log('node-compress is required to support gzip compression in HTTP requests');
+}
+
+
 var toBase64 = function(str) {
   return  (new Buffer(str || "", "ascii")).toString("base64");
 };
@@ -37,6 +46,9 @@ function request (options, callback) {
     var setHost = true;
   } else {
     var setHost = false;
+  }
+  if (options.gzip && compress) {
+      options.headers['accept-encoding'] = 'gzip;q=1.0';
   }
   
   if (!options.uri.pathname) {options.uri.pathname = '/'}
@@ -73,17 +85,32 @@ function request (options, callback) {
   options.request = options.client.request(options.method, options.fullpath, options.headers);
   
   options.request.addListener("response", function (response) {
-    var buffer;
+    var buffer, responseStream;
+
+    // If we get a gzip encoding, pump the response in a stream decoder,
+    // and connect the rest of event listeners to the decoder
+    if (response.headers['content-encoding'] && response.headers['content-encoding'] == 'gzip') {
+        if (!compress) {
+            clientErrorHandler(new Error("Cannot decode gzip response, please install `node-compress`"));
+            return;
+        }
+        responseStream = new compress.GunzipStream();
+        sys.pump(response, responseStream);
+    }
+    else {
+        responseStream = response;
+    }
+
     if (options.responseBodyStream) {
       buffer = options.responseBodyStream;
-      sys.pump(response, options.responseBodyStream);
+      sys.pump(responseStream, options.responseBodyStream);
     }
     else {
       buffer = '';
-      response.addListener("data", function (chunk) { buffer += chunk; } )
+      responseStream.addListener("data", function (chunk) { buffer += chunk; } )
     }
     
-    response.addListener("end", function () {
+    responseStream.addListener("end", function () {
       options.client.removeListener("error", clientErrorHandler);
       /* Some errors can happen after the `end` event has been received,
        * for example, with an invalid Content-Length. Attaching a no-op
