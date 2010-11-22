@@ -1,6 +1,7 @@
 var http = require('http')
   , url = require('url')
   , sys = require('sys')
+  , Iconv = require('iconv').Iconv
   ;
 
 var compress;
@@ -86,6 +87,8 @@ function request (options, callback) {
   
   options.request.addListener("response", function (response) {
     var buffer, responseStream;
+    // Treat the body as binary data, we'll decode it later
+    response.setEncoding('binary');
 
     // If we get a gzip encoding, pump the response in a stream decoder,
     // and connect the rest of event listeners to the decoder
@@ -95,6 +98,10 @@ function request (options, callback) {
             return;
         }
         responseStream = new compress.GunzipStream();
+        // From and to binary
+        responseStream.setInputEncoding('binary');
+        responseStream.setEncoding('binary');
+        // Pump the response body in the decoding stream
         sys.pump(response, responseStream);
     }
     else {
@@ -109,6 +116,7 @@ function request (options, callback) {
       buffer = '';
       responseStream.addListener("data", function (chunk) { buffer += chunk; } )
     }
+
 
     var closeTimeout;
     // If the server closes the connection before sending all the request,
@@ -142,6 +150,24 @@ function request (options, callback) {
         return;
       } else {options._redirectsFollowed = 0}
       
+      // Convert the response
+      // Assume utf-8 if we can't get the charset
+      // from the HTTP headers
+      var charset = 'utf-8';
+      if (response.headers['content-type']) {
+        var match = /;\s*charset=([^\s;]+)\s*(?:;|$)/.exec(response.headers['content-type']);
+        if (match) {
+          charset = match[1];
+        }
+      }
+
+      try {
+        buffer = (new Iconv(charset, 'utf-8')).convert(new Buffer(buffer, 'binary')).toString();
+      } catch (e) {
+        // Keep binary encoding, and log the error
+        sys.log('Got an error while converting '+options.uri.toString()+' from '+charset+' ('+(response.headers['content-type']||'')+') to UTF-8');
+      }
+
       if (setHost) delete options.headers.host;
       if (callback) callback(null, response, buffer);
     })
