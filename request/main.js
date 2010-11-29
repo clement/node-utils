@@ -141,7 +141,7 @@ function request (options, callback) {
       
       if (response.statusCode > 299 && response.statusCode < 400 && options.followRedirect && response.headers.location && (options._redirectsFollowed < options.maxRedirects) ) {
         options._redirectsFollowed += 1
-        options.uri = response.headers.location;
+        options.uri = url.resolve(options.uri, response.headers.location);
         delete options.client; 
         if (options.headers) {
           delete options.headers.host;
