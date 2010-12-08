@@ -87,8 +87,6 @@ function request (options, callback) {
   
   options.request.addListener("response", function (response) {
     var buffer, responseStream;
-    // Treat the body as binary data, we'll decode it later
-    response.setEncoding('binary');
 
     // If we get a gzip encoding, pump the response in a stream decoder,
     // and connect the rest of event listeners to the decoder
@@ -98,9 +96,6 @@ function request (options, callback) {
             return;
         }
         responseStream = new compress.GunzipStream();
-        // From and to binary
-        responseStream.setInputEncoding('binary');
-        responseStream.setEncoding('binary');
         // Pump the response body in the decoding stream
         sys.pump(response, responseStream);
     }
@@ -113,8 +108,14 @@ function request (options, callback) {
       sys.pump(responseStream, options.responseBodyStream);
     }
     else {
-      buffer = '';
-      responseStream.addListener("data", function (chunk) { buffer += chunk; } )
+      buffer = new Buffer(0);
+      responseStream.addListener("data", function (chunk) {
+          // Buffer concatenation
+          var acc = new Buffer(buffer.length + chunk.length);
+          if (buffer.length) { buffer.copy(acc, 0, 0); }
+          chunk.copy(acc, buffer.length, 0);
+          buffer = acc;
+        });
     }
 
 
@@ -150,22 +151,30 @@ function request (options, callback) {
         return;
       } else {options._redirectsFollowed = 0}
       
-      // Convert the response
-      // Assume utf-8 if we can't get the charset
-      // from the HTTP headers
-      var charset = 'utf-8';
-      if (response.headers['content-type']) {
-        var match = /;\s*charset=([^\s;]+)\s*(?:;|$)/.exec(response.headers['content-type']);
-        if (match) {
-          charset = match[1];
-        }
-      }
+      if (!options.responseBodyStream) {
+        // Convert the response body to a proper unicode string
 
-      try {
-        buffer = (new Iconv(charset, 'utf-8')).convert(new Buffer(buffer, 'binary')).toString();
-      } catch (e) {
-        // Keep binary encoding, and log the error
-        sys.log('Got an error while converting '+options.uri.toString()+' from '+charset+' ('+(response.headers['content-type']||'')+') to UTF-8');
+        // Assume utf-8 if we can't get the charset
+        // from the HTTP headers
+        var charset = 'utf-8';
+        if (response.headers['content-type']) {
+          var match = /;\s*charset=([^\s;]+)\s*(?:;|$)/.exec(response.headers['content-type']);
+          if (match) {
+            charset = match[1];
+          }
+        }
+
+        try {
+          // Use iconv only if we're not already in UTF-8
+          if (charset.toLowerCase() != 'utf-8') {
+              buffer = (new Iconv(charset, 'utf-8')).convert(buffer);
+          }
+          buffer = buffer.toString();
+        } catch (e) {
+          // Keep binary encoding, and log the error
+          sys.log('Got an error while converting '+options.uri.href+' from '+charset+' ('+(response.headers['content-type']||'')+') to UTF-8');
+          buffer = buffer.toString('binary');
+        }
       }
 
       if (setHost) delete options.headers.host;
