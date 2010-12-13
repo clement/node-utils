@@ -12,6 +12,14 @@ catch (e) {
     sys.log('node-compress is required to support gzip compression in HTTP requests');
 }
 
+var cookiejar;
+try {
+    cookiejar = require('cookiejar');
+}
+catch (e) {
+    sys.log('cookiejar is required to handle cookie during redirects chains');
+}
+
 
 var toBase64 = function(str) {
   return  (new Buffer(str || "", "ascii")).toString("base64");
@@ -32,6 +40,7 @@ function request (options, callback) {
   
   options._redirectsFollowed = options._redirectsFollowed ? options._redirectsFollowed : 0;
   options.maxRedirects = options.maxRedirects ? options.maxRedirects : 10;
+  options.jar = options.jar || (cookiejar && (new cookiejar.CookieJar()));
     
   options.followRedirect = (options.followRedirect !== undefined) ? options.followRedirect : true;
   options.method = options.method ? options.method : 'GET';
@@ -64,6 +73,14 @@ function request (options, callback) {
     var secure = false;
   }
   
+  if (options.jar) {
+      options.headers['Cookie'] = options.jar.getCookies({domain:options.uri.hostname,
+                                                          path:options.uri.pathname,
+                                                          secure:secure})
+                                             .map(function (cookie) { return cookie.toValueString(); })
+                                             .join(';');
+  }
+
   if (options.bodyStream) {
     sys.error('options.bodyStream is deprecated. use options.reponseBodyStream instead.');
     options.responseBodyStream = options.bodyStream;
@@ -142,6 +159,12 @@ function request (options, callback) {
       
       if (response.statusCode > 299 && response.statusCode < 400 && options.followRedirect && response.headers.location && (options._redirectsFollowed < options.maxRedirects) ) {
         options._redirectsFollowed += 1
+
+        // Set cookies
+        if (options.jar && response.headers['set-cookie']) {
+            options.jar.setCookies(response.headers['set-cookie']);
+        }
+
         options.uri = url.resolve(options.uri, response.headers.location);
         delete options.client; 
         if (options.headers) {
