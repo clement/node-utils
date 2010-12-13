@@ -162,7 +162,13 @@ function request (options, callback) {
 
         // Set cookies
         if (options.jar && response.headers['set-cookie']) {
-            options.jar.setCookies(response.headers['set-cookie']);
+            // Can be hazardous with cookiejar (see commits in my fork clement/cookiejar)
+            try {
+                options.jar.setCookies(response.headers['set-cookie']);
+            }
+            catch (e) {
+                sys.log('Error parsing cookies: '+e);
+            }
         }
 
         options.uri = url.resolve(options.uri, response.headers.location);
